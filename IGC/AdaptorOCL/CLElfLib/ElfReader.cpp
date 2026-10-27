@@ -259,7 +259,12 @@ const char *CElfReader::GetSectionName(unsigned int sectionIndex) {
   const SElfSectionHeader *pSectionHeader = GetSectionHeader(sectionIndex);
 
   if (pSectionHeader && m_pNameTable) {
-    pName = m_pNameTable + pSectionHeader->Name;
+    // the name must start inside the string table and be NULL terminated within it
+    const uint64_t nameOffset = (uint64_t)pSectionHeader->Name;
+    if (nameOffset < (uint64_t)m_nameTableSize &&
+        memchr(m_pNameTable + nameOffset, '\0', (size_t)(m_nameTableSize - nameOffset)) != NULL) {
+      pName = m_pNameTable + nameOffset;
+    }
   }
 
   return pName;
