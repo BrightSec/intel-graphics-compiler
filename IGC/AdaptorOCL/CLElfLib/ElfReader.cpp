@@ -34,10 +34,14 @@ CElfReader::CElfReader(const char *pElfBinary, const size_t elfBinarySize) {
   m_nameTableSize = 0;
   m_pElfHeader = (SElfHeader *)pElfBinary;
   m_pBinary = pElfBinary;
+  m_binarySize = elfBinarySize;
 
   // get a pointer to the string table
-  if (m_pElfHeader) {
-    GetSectionData(m_pElfHeader->SectionNameTableIndex, m_pNameTable, m_nameTableSize);
+  if (m_pElfHeader && elfBinarySize >= sizeof(SElfHeader)) {
+    if (GetSectionData(m_pElfHeader->SectionNameTableIndex, m_pNameTable, m_nameTableSize) != SUCCESS) {
+      m_pNameTable = NULL;
+      m_nameTableSize = 0;
+    }
   }
 }
 
@@ -182,9 +186,15 @@ const SElfSectionHeader *CElfReader::GetSectionHeader(unsigned int sectionIndex)
   size_t entrySize = m_pElfHeader->SectionHeaderEntrySize;
 
   if (sectionIndex < m_pElfHeader->NumSectionHeaderEntries) {
-    indexedSectionHeaderOffset = (size_t)m_pElfHeader->SectionHeadersOffset + (sectionIndex * entrySize);
+    const uint64_t hdrOff = (uint64_t)m_pElfHeader->SectionHeadersOffset + ((uint64_t)sectionIndex * (uint64_t)entrySize);
+    const uint64_t totalSize = (uint64_t)m_binarySize;
 
-    pSectionHeader = (SElfSectionHeader *)((char *)m_pElfHeader + indexedSectionHeaderOffset);
+    // the whole section header must lie inside the binary
+    if (hdrOff >= (uint64_t)m_pElfHeader->SectionHeadersOffset && hdrOff <= totalSize &&
+        totalSize - hdrOff >= (uint64_t)sizeof(SElfSectionHeader)) {
+      indexedSectionHeaderOffset = (size_t)hdrOff;
+      pSectionHeader = (SElfSectionHeader *)((char *)m_pElfHeader + indexedSectionHeaderOffset);
+    }
   }
 
   return pSectionHeader;
@@ -220,9 +230,16 @@ E_RETVAL CElfReader::GetSectionData(const unsigned int sectionIndex, char *&pDat
   const SElfSectionHeader *pSectionHeader = GetSectionHeader(sectionIndex);
 
   if (pSectionHeader) {
-    pData = (char *)m_pBinary + pSectionHeader->DataOffset;
-    dataSize = (size_t)pSectionHeader->DataSize;
-    retVal = SUCCESS;
+    const uint64_t dataOffset = (uint64_t)pSectionHeader->DataOffset;
+    const uint64_t size = (uint64_t)pSectionHeader->DataSize;
+    const uint64_t totalSize = (uint64_t)m_binarySize;
+
+    // the section data must lie inside the binary
+    if (dataOffset <= totalSize && size <= totalSize - dataOffset) {
+      pData = (char *)m_pBinary + dataOffset;
+      dataSize = (size_t)size;
+      retVal = SUCCESS;
+    }
   }
 
   return retVal;

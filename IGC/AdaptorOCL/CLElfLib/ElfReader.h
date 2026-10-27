@@ -56,6 +56,7 @@ protected:
 
   SElfHeader *m_pElfHeader; // pointer to the ELF header
   const char *m_pBinary;    // portable ELF binary
+  size_t m_binarySize;      // size of the ELF binary in bytes
   char *m_pNameTable;       // pointer to the string table
   size_t m_nameTableSize;   // size of string table in bytes
 };
