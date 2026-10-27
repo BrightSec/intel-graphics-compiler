@@ -34,10 +34,14 @@ CElfReader::CElfReader(const char *pElfBinary, const size_t elfBinarySize) {
   m_nameTableSize = 0;
   m_pElfHeader = (SElfHeader *)pElfBinary;
   m_pBinary = pElfBinary;
+  m_binarySize = elfBinarySize;
 
   // get a pointer to the string table
-  if (m_pElfHeader) {
-    GetSectionData(m_pElfHeader->SectionNameTableIndex, m_pNameTable, m_nameTableSize);
+  if (m_pElfHeader && elfBinarySize >= sizeof(SElfHeader)) {
+    if (GetSectionData(m_pElfHeader->SectionNameTableIndex, m_pNameTable, m_nameTableSize) != SUCCESS) {
+      m_pNameTable = NULL;
+      m_nameTableSize = 0;
+    }
   }
 }
 
@@ -104,37 +108,49 @@ bool CElfReader::IsValidElf(const void *pBinary, const size_t binarySize) {
     // get the section entry size
     entrySize = pElfHeader->SectionHeaderEntrySize;
 
+    bool hasNameTable = false;
+    uint64_t nameTableOffset = 0;
+    const uint64_t totalSize = (uint64_t)binarySize;
+    const uint64_t hdrSize = (uint64_t)sizeof(SElfSectionHeader);
+
     // get an offset to the name table
     if (pElfHeader->SectionNameTableIndex < pElfHeader->NumSectionHeaderEntries) {
-      indexedSectionHeaderOffset =
-          (size_t)pElfHeader->SectionHeadersOffset + (pElfHeader->SectionNameTableIndex * entrySize);
+      uint64_t hdrOff = (uint64_t)pElfHeader->SectionHeadersOffset +
+                        ((uint64_t)pElfHeader->SectionNameTableIndex * (uint64_t)entrySize);
 
-      if (((char *)pBinary + indexedSectionHeaderOffset) <= pEnd) {
-        SElfSectionHeader *pNameTableSectionHeader =
-            (SElfSectionHeader *)((char *)pBinary + indexedSectionHeaderOffset);
-        pNameTable = (char *)pBinary + pNameTableSectionHeader->DataOffset;
+      if (hdrOff >= (uint64_t)pElfHeader->SectionHeadersOffset && hdrOff <= totalSize &&
+          totalSize - hdrOff >= hdrSize) {
+        const SElfSectionHeader *pNameTableSectionHeader =
+            (const SElfSectionHeader *)((const char *)pBinary + hdrOff);
+        if ((uint64_t)pNameTableSectionHeader->DataOffset <= totalSize) {
+          nameTableOffset = (uint64_t)pNameTableSectionHeader->DataOffset;
+          hasNameTable = true;
+        }
       }
     }
 
     for (unsigned int i = 0; i < pElfHeader->NumSectionHeaderEntries; i++) {
-      indexedSectionHeaderOffset = (size_t)pElfHeader->SectionHeadersOffset + (i * entrySize);
+      uint64_t hdrOff = (uint64_t)pElfHeader->SectionHeadersOffset + ((uint64_t)i * (uint64_t)entrySize);
 
-      // check section header offset
-      if (((char *)pBinary + indexedSectionHeaderOffset) > pEnd) {
+      // check section header offset (and that the whole header is in range)
+      if (hdrOff < (uint64_t)pElfHeader->SectionHeadersOffset || hdrOff > totalSize ||
+          totalSize - hdrOff < hdrSize) {
         retVal = false;
         break;
       }
 
-      pSectionHeader = (SElfSectionHeader *)((char *)pBinary + indexedSectionHeaderOffset);
+      pSectionHeader = (SElfSectionHeader *)((char *)pBinary + hdrOff);
 
-      // check section data
-      if (((char *)pBinary + pSectionHeader->DataOffset + pSectionHeader->DataSize) > pEnd) {
+      // check section data (overflow-safe)
+      uint64_t dataOffset = (uint64_t)pSectionHeader->DataOffset;
+      uint64_t dataSize = (uint64_t)pSectionHeader->DataSize;
+      if (dataOffset > totalSize || dataSize > totalSize - dataOffset) {
         retVal = false;
         break;
       }
 
       // check section name index
-      if ((pNameTable + pSectionHeader->Name) > pEnd) {
+      if (hasNameTable && ((uint64_t)pSectionHeader->Name > totalSize - nameTableOffset)) {
         retVal = false;
         break;
       }
@@ -170,9 +186,15 @@ const SElfSectionHeader *CElfReader::GetSectionHeader(unsigned int sectionIndex)
   size_t entrySize = m_pElfHeader->SectionHeaderEntrySize;
 
   if (sectionIndex < m_pElfHeader->NumSectionHeaderEntries) {
-    indexedSectionHeaderOffset = (size_t)m_pElfHeader->SectionHeadersOffset + (sectionIndex * entrySize);
+    const uint64_t hdrOff = (uint64_t)m_pElfHeader->SectionHeadersOffset + ((uint64_t)sectionIndex * (uint64_t)entrySize);
+    const uint64_t totalSize = (uint64_t)m_binarySize;
 
-    pSectionHeader = (SElfSectionHeader *)((char *)m_pElfHeader + indexedSectionHeaderOffset);
+    // the whole section header must lie inside the binary
+    if (hdrOff >= (uint64_t)m_pElfHeader->SectionHeadersOffset && hdrOff <= totalSize &&
+        totalSize - hdrOff >= (uint64_t)sizeof(SElfSectionHeader)) {
+      indexedSectionHeaderOffset = (size_t)hdrOff;
+      pSectionHeader = (SElfSectionHeader *)((char *)m_pElfHeader + indexedSectionHeaderOffset);
+    }
   }
 
   return pSectionHeader;
@@ -208,9 +230,16 @@ E_RETVAL CElfReader::GetSectionData(const unsigned int sectionIndex, char *&pDat
   const SElfSectionHeader *pSectionHeader = GetSectionHeader(sectionIndex);
 
   if (pSectionHeader) {
-    pData = (char *)m_pBinary + pSectionHeader->DataOffset;
-    dataSize = (size_t)pSectionHeader->DataSize;
-    retVal = SUCCESS;
+    const uint64_t dataOffset = (uint64_t)pSectionHeader->DataOffset;
+    const uint64_t size = (uint64_t)pSectionHeader->DataSize;
+    const uint64_t totalSize = (uint64_t)m_binarySize;
+
+    // the section data must lie inside the binary
+    if (dataOffset <= totalSize && size <= totalSize - dataOffset) {
+      pData = (char *)m_pBinary + dataOffset;
+      dataSize = (size_t)size;
+      retVal = SUCCESS;
+    }
   }
 
   return retVal;
@@ -246,8 +275,13 @@ const char *CElfReader::GetSectionName(unsigned int sectionIndex) {
   char *pName = NULL;
   const SElfSectionHeader *pSectionHeader = GetSectionHeader(sectionIndex);
 
-  if (pSectionHeader) {
-    pName = m_pNameTable + pSectionHeader->Name;
+  if (pSectionHeader && m_pNameTable) {
+    // the name must start inside the string table and be NULL terminated within it
+    const uint64_t nameOffset = (uint64_t)pSectionHeader->Name;
+    if (nameOffset < (uint64_t)m_nameTableSize &&
+        memchr(m_pNameTable + nameOffset, '\0', (size_t)(m_nameTableSize - nameOffset)) != NULL) {
+      pName = m_pNameTable + nameOffset;
+    }
   }
 
   return pName;

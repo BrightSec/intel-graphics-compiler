@@ -248,7 +248,8 @@ llvm::Error SpvSplitter::HandleDecorate(llvm::ArrayRef<uint32_t> words) {
   // Word 2: Decoration (enum)
   // Word 3..N: Extra operands depending on decoration
 
-  IGC_ASSERT(words.size() >= 3);
+  if (words.size() < 3)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "Malformed OpDecorate instruction");
 
   uint32_t targetId = words[1];
   uint32_t decoration = words[2];
@@ -289,7 +290,8 @@ llvm::Error SpvSplitter::HandleGroupDecorate(llvm::ArrayRef<uint32_t> words) {
   // Word 1: Decoration Group ID
   // Words 2..N: Target IDs to be decorated with the group
 
-  IGC_ASSERT(words.size() >= 2);
+  if (words.size() < 2)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "Malformed OpGroupDecorate instruction");
 
   uint32_t groupId = words[1];
 
@@ -315,7 +317,8 @@ llvm::Error SpvSplitter::HandleFunctionStart(llvm::ArrayRef<uint32_t> words) {
   // Word 3: Function Control
   // Word 4: Function Type ID
 
-  IGC_ASSERT(words.size() >= 5);
+  if (words.size() < 5)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "Malformed OpFunction instruction");
 
   uint32_t resultId = words[2];
 
@@ -375,7 +378,8 @@ llvm::Error SpvSplitter::HandleEntryPoint(llvm::ArrayRef<uint32_t> words) {
   // Word 2: Entry Point ID
   // Words 3..N: Name (string), Interface IDs
 
-  IGC_ASSERT(words.size() >= 3);
+  if (words.size() < 3)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "Malformed OpEntryPoint instruction");
 
   uint32_t entryPointId = words[2];
   entry_points_.insert(entryPointId);
@@ -393,7 +397,8 @@ llvm::Error SpvSplitter::HandleExecutionMode(llvm::ArrayRef<uint32_t> words) {
   // Word 2: Execution Mode
   // Words 3..N: Optional operands
 
-  IGC_ASSERT(words.size() >= 3);
+  if (words.size() < 3)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "Malformed OpExecutionMode instruction");
 
   uint32_t entryPointId = words[1];
   uint32_t execMode = words[2];
